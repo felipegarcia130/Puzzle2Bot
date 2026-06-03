@@ -1,5 +1,3 @@
-
-"""
 import cv2
 import math
 import numpy as np
@@ -7,7 +5,8 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry, OccupancyGrid
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from tf2_ros import TransformBroadcaster
 
 N          = 500   # partículas totales — suficiente para localización global
 N_RANDOM   = 50    # 5% aleatorias en cada ciclo (kidnapped robot)
@@ -19,6 +18,13 @@ MAP_Y_MIN  = -3.0
 MAP_Y_MAX  =  6.0
 RESOLUTION =  0.05
 
+MAX_RANGE_PX_CAP = 150   # 7.5 m — evita tensores enormes
+SIGMA_SENSOR     = 0.15  # antes 0.5 — más discriminativo
+NOISE_POST_RESAMPLE_POS = 0.3
+NOISE_POST_RESAMPLE_ANG = 0.03
+NOISE_MOTION_POS = 0.1
+NOISE_MOTION_ANG = 0.01
+ADAPTIVE_RAND_FRAC = 0.05  # fracción máxima de partículas aleatorias (AMCL ligero)
 
 def ray_casting_vectorized(particulas, grid, angles, max_range, step=2):
     H, W = grid.shape
@@ -50,6 +56,20 @@ def ray_casting_vectorized(particulas, grid, angles, max_range, step=2):
     distancias[no_hit] = max_range
 
     return distancias.astype(np.float32)
+
+def systematic_resample(N, pesos):
+    #Low-variance resampling — evita impoverishment del multinomial.
+    posiciones = (np.arange(N) + np.random.uniform()) / N
+    indices = np.zeros(N, dtype=int)
+    acum = np.cumsum(pesos)
+    i, j = 0, 0
+    while i < N:
+        if posiciones[i] < acum[j]:
+            indices[i] = j
+            i += 1
+        else:
+            j = min(j + 1, N - 1)
+    return indices
 
 
 class MCLNode(Node):
@@ -276,92 +296,7 @@ class MCLNode(Node):
         cv2.imshow('MCL', mapa_vis)
         cv2.waitKey(1)
 
-
-def main():
-    rclpy.init()
-    node = MCLNode()
-    rclpy.spin(node)
-
-
-if __name__ == '__main__':
-    main()
-"""
-
-import cv2
-import math
-import numpy as np
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry, OccupancyGrid
-from geometry_msgs.msg import PoseStamped, TransformStamped
-from tf2_ros import TransformBroadcaster
-
-N = 500  # aumentado de 100 → 500
-
-MAP_X_MIN  = -4.0
-MAP_X_MAX  =  5.0
-MAP_Y_MIN  = -3.0
-MAP_Y_MAX  =  6.0
-RESOLUTION =  0.05
-
-MAX_RANGE_PX_CAP = 150   # 7.5 m — evita tensores enormes
-SIGMA_SENSOR     = 0.15  # antes 0.5 — más discriminativo
-NOISE_POST_RESAMPLE_POS = 0.3
-NOISE_POST_RESAMPLE_ANG = 0.03
-NOISE_MOTION_POS = 0.1
-NOISE_MOTION_ANG = 0.01
-ADAPTIVE_RAND_FRAC = 0.05  # fracción máxima de partículas aleatorias (AMCL ligero)
-
-
-def ray_casting_vectorized(particulas, grid, angles, max_range, step=3):
-    H, W = grid.shape
-
-    filas  = particulas[:, 0]
-    cols   = particulas[:, 1]
-    thetas = particulas[:, 2]
-
-    abs_angles = thetas[:, None] + angles[None, :] + math.pi
-    sin_a = np.sin(abs_angles)
-    cos_a = np.cos(abs_angles)
-
-    steps = np.arange(step, max_range + step, step, dtype=np.float32)
-
-    f_idx = (filas[:, None, None] - sin_a[:, :, None] * steps[None, None, :]).astype(np.int32)
-    c_idx = (cols[:, None, None]  + cos_a[:, :, None] * steps[None, None, :]).astype(np.int32)
-
-    out_of_bounds = (f_idx < 0) | (f_idx >= H) | (c_idx < 0) | (c_idx >= W)
-    f_safe = np.clip(f_idx, 0, H - 1)
-    c_safe = np.clip(c_idx, 0, W - 1)
-
-    hit_wall = (grid[f_safe, c_safe] == 0)
-    hit = out_of_bounds | hit_wall
-
-    first_hit_idx = np.argmax(hit, axis=2)
-    no_hit = ~hit.any(axis=2)
-
-    distancias = steps[first_hit_idx]
-    distancias[no_hit] = max_range
-
-    return distancias.astype(np.float32)
-
-
-def systematic_resample(N, pesos):
-    """Low-variance resampling — evita impoverishment del multinomial."""
-    posiciones = (np.arange(N) + np.random.uniform()) / N
-    indices = np.zeros(N, dtype=int)
-    acum = np.cumsum(pesos)
-    i, j = 0, 0
-    while i < N:
-        if posiciones[i] < acum[j]:
-            indices[i] = j
-            i += 1
-        else:
-            j = min(j + 1, N - 1)
-    return indices
-
-
-class MCLNode(Node):
+class MCLNodeFij(Node):
     def __init__(self):
         super().__init__('mcl_node')
 
@@ -591,12 +526,11 @@ class MCLNode(Node):
         cv2.imshow('MCL', mapa_vis)
         cv2.waitKey(1)
 
-
 def main():
     rclpy.init()
-    node = MCLNode()
+    #node = MCLNode()
+    node = MCLNodeFij()
     rclpy.spin(node)
-    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
