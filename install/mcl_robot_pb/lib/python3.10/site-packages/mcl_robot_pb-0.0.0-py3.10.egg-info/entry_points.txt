@@ -1,7 +1,0 @@
-[console_scripts]
-astar_node = mcl_robot_pb.astar_node:main
-exploration_node = mcl_robot_pb.exploration_node:main
-mcl_node = mcl_robot_pb.mcl_node:main
-odom_node = mcl_robot_pb.odom_node:main
-slam_node = mcl_robot_pb.slam_node:main
-

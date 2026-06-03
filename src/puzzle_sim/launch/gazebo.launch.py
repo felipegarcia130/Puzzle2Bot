@@ -7,7 +7,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import Command
 
 def generate_launch_description():
-    pkg = get_package_share_directory('puzzle_sim_pb')
+    pkg = get_package_share_directory('puzzle_sim')
     xacro_file = os.path.join(pkg, 'xacro', 'puzzlebot.urdf.xacro')
 
     robot_desc = ParameterValue(Command(['xacro ', xacro_file]), value_type=str)
