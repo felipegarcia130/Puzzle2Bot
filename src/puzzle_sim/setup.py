@@ -2,7 +2,7 @@ from setuptools import setup
 import os
 from glob import glob
 
-package_name = 'puzzle_sim'
+package_name = 'puzzle_sim_pb'
 
 setup(
     name=package_name,

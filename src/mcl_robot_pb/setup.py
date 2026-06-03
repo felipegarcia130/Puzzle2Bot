@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'mcl_robot'
+package_name = 'mcl_robot_pb'
 
 setup(
     name=package_name,
@@ -28,11 +28,11 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'mcl_node = mcl_robot.mcl_node:main',
-            'astar_node = mcl_robot.astar_node:main',
-            'slam_node =mcl_robot.slam_node:main',
-            'exploration_node= mcl_robot.exploration_node:main',
-            'odom_node=mcl_robot.odom_node:main',
+            'mcl_node = mcl_robot_pb.mcl_node:main',
+            'astar_node = mcl_robot_pb.astar_node:main',
+            'slam_node =mcl_robot_pb.slam_node:main',
+            'exploration_node= mcl_robot_pb.exploration_node:main',
+            'odom_node=mcl_robot_pb.odom_node:main',
         ],
     },
 )
