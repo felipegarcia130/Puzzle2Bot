@@ -1,0 +1,7 @@
+[console_scripts]
+astar_node = mcl_robot.astar_node:main
+exploration_node = mcl_robot.exploration_node:main
+mcl_node = mcl_robot.mcl_node:main
+odom_node = mcl_robot.odom_node:main
+slam_node = mcl_robot.slam_node:main
+
