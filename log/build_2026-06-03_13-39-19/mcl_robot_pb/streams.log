@@ -1,0 +1,14 @@
+[0.468s] Invoking command in '/home/felipe/puzzlebot_ws/src': PYTHONPATH=/home/felipe/puzzlebot_ws/build/mcl_robot_pb/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/mcl_robot_pb build --build-base /home/felipe/puzzlebot_ws/build/mcl_robot_pb/build install --record /home/felipe/puzzlebot_ws/build/mcl_robot_pb/install.log --single-version-externally-managed install_data
+[0.639s] running egg_info
+[0.642s] writing manifest file '../build/mcl_robot_pb/mcl_robot_pb.egg-info/SOURCES.txt'
+[0.642s] running build
+[0.642s] running build_py
+[0.642s] running install
+[0.643s] running install_lib
+[0.644s] running install_data
+[0.644s] running install_egg_info
+[0.646s] removing '/home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages/mcl_robot_pb-0.0.0-py3.10.egg-info' (and everything under it)
+[0.646s] Copying ../build/mcl_robot_pb/mcl_robot_pb.egg-info to /home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages/mcl_robot_pb-0.0.0-py3.10.egg-info
+[0.646s] running install_scripts
+[0.662s] writing list of installed files to '/home/felipe/puzzlebot_ws/build/mcl_robot_pb/install.log'
+[0.682s] Invoked command in '/home/felipe/puzzlebot_ws/src' returned '0': PYTHONPATH=/home/felipe/puzzlebot_ws/build/mcl_robot_pb/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/mcl_robot_pb build --build-base /home/felipe/puzzlebot_ws/build/mcl_robot_pb/build install --record /home/felipe/puzzlebot_ws/build/mcl_robot_pb/install.log --single-version-externally-managed install_data

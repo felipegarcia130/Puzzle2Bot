@@ -1,0 +1,33 @@
+[0.965s] Invoking command in '/home/felipe/puzzlebot_ws/src/obstacle_avoidance': PYTHONPATH=/home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/obstacle_avoidance_pb build --build-base /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build install --record /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/install.log --single-version-externally-managed install_data
+[1.200s] running egg_info
+[1.201s] creating ../../build/obstacle_avoidance_pb/obstacle_avoidance_pb.egg-info
+[1.202s] writing manifest file '../../build/obstacle_avoidance_pb/obstacle_avoidance_pb.egg-info/SOURCES.txt'
+[1.204s] writing manifest file '../../build/obstacle_avoidance_pb/obstacle_avoidance_pb.egg-info/SOURCES.txt'
+[1.204s] running build
+[1.204s] running build_py
+[1.205s] creating /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build
+[1.205s] creating /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib
+[1.205s] creating /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.205s] copying obstacle_avoidance/bug1.py -> /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.205s] copying obstacle_avoidance/avoider_node.py -> /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.205s] copying obstacle_avoidance/__init__.py -> /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.205s] copying obstacle_avoidance/bug0.py -> /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.205s] copying obstacle_avoidance/bug2.py -> /home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/build/lib/obstacle_avoidance
+[1.206s] running install
+[1.206s] running install_lib
+[1.207s] creating /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance
+[1.208s] byte-compiling /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance/bug1.py to bug1.cpython-310.pyc
+[1.210s] byte-compiling /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance/avoider_node.py to avoider_node.cpython-310.pyc
+[1.210s] byte-compiling /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance/__init__.py to __init__.cpython-310.pyc
+[1.211s] byte-compiling /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance/bug0.py to bug0.cpython-310.pyc
+[1.212s] byte-compiling /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance/bug2.py to bug2.cpython-310.pyc
+[1.213s] running install_data
+[1.213s] creating /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/share/ament_index
+[1.213s] creating /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/share/ament_index/resource_index
+[1.213s] creating /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/share/ament_index/resource_index/packages
+[1.214s] copying resource/obstacle_avoidance_pb -> /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/share/ament_index/resource_index/packages
+[1.214s] copying package.xml -> /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/share/obstacle_avoidance_pb
+[1.214s] running install_egg_info
+[1.216s] Copying ../../build/obstacle_avoidance_pb/obstacle_avoidance_pb.egg-info to /home/felipe/puzzlebot_ws/install/obstacle_avoidance_pb/lib/python3.10/site-packages/obstacle_avoidance_pb-0.0.0-py3.10.egg-info
+[1.217s] running install_scripts
+[1.239s] writing list of installed files to '/home/felipe/puzzlebot_ws/build/obstacle_avoidance_pb/install.log'

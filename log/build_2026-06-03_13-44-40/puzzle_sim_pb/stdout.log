@@ -1,0 +1,40 @@
+running egg_info
+writing manifest file '../../build/puzzle_sim_pb/puzzle_sim_pb.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/felipe/puzzlebot_ws/build/puzzle_sim_pb/build
+creating /home/felipe/puzzlebot_ws/build/puzzle_sim_pb/build/lib
+creating /home/felipe/puzzlebot_ws/build/puzzle_sim_pb/build/lib/puzzle_sim_pb
+copying puzzle_sim_pb/__init__.py -> /home/felipe/puzzlebot_ws/build/puzzle_sim_pb/build/lib/puzzle_sim_pb
+running install
+running install_lib
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/lib/python3.10/site-packages/puzzle_sim_pb
+byte-compiling /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/lib/python3.10/site-packages/puzzle_sim_pb/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/ament_index
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/ament_index/resource_index
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/ament_index/resource_index/packages
+copying resource/puzzle_sim_pb -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/ament_index/resource_index/packages
+copying package.xml -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/launch
+copying launch/gazebo.launch.py -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/launch
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/urdf
+copying urdf/materials.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/urdf
+copying urdf/parameters.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/urdf
+copying urdf/macros.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/urdf
+copying urdf/puzzlebot.urdf -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/urdf
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+copying meshes/chassis2.stl -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+copying meshes/wheel2.stl -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+copying meshes/LiDAR.stl -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+copying meshes/wheel.stl -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+copying meshes/chassis.stl -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/meshes
+creating /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/xacro
+copying xacro/materials.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/xacro
+copying xacro/parameters.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/xacro
+copying xacro/puzzlebot.urdf.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/xacro
+copying xacro/macros.xacro -> /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/share/puzzle_sim_pb/xacro
+running install_egg_info
+Copying ../../build/puzzle_sim_pb/puzzle_sim_pb.egg-info to /home/felipe/puzzlebot_ws/install/puzzle_sim_pb/lib/python3.10/site-packages/puzzle_sim_pb-0.0.1-py3.10.egg-info
+running install_scripts
+writing list of installed files to '/home/felipe/puzzlebot_ws/build/puzzle_sim_pb/install.log'

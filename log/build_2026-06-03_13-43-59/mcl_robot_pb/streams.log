@@ -1,0 +1,15 @@
+[0.812s] Invoking command in '/home/felipe/puzzlebot_ws/src/mcl_robot_pb': PYTHONPATH=/home/felipe/puzzlebot_ws/build/mcl_robot_pb/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/mcl_robot_pb build --build-base /home/felipe/puzzlebot_ws/build/mcl_robot_pb/build install --record /home/felipe/puzzlebot_ws/build/mcl_robot_pb/install.log --single-version-externally-managed install_data
+[1.000s] running egg_info
+[1.003s] writing manifest file '../../build/mcl_robot_pb/mcl_robot_pb.egg-info/SOURCES.txt'
+[1.003s] running build
+[1.003s] running build_py
+[1.003s] running install
+[1.004s] running install_lib
+[1.005s] running install_data
+[1.005s] copying maps/slam_map.npy -> /home/felipe/puzzlebot_ws/install/mcl_robot_pb/share/mcl_robot_pb/maps
+[1.005s] copying maps/slam_log_odds.npy -> /home/felipe/puzzlebot_ws/install/mcl_robot_pb/share/mcl_robot_pb/maps
+[1.005s] running install_egg_info
+[1.007s] removing '/home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages/mcl_robot_pb-0.0.0-py3.10.egg-info' (and everything under it)
+[1.007s] Copying ../../build/mcl_robot_pb/mcl_robot_pb.egg-info to /home/felipe/puzzlebot_ws/install/mcl_robot_pb/lib/python3.10/site-packages/mcl_robot_pb-0.0.0-py3.10.egg-info
+[1.008s] running install_scripts
+[1.026s] writing list of installed files to '/home/felipe/puzzlebot_ws/build/mcl_robot_pb/install.log'

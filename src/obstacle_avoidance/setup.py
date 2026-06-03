@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'obstacle_avoidance'
+package_name = 'obstacle_avoidance_pb'
 
 setup(
     name=package_name,
@@ -24,10 +24,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'avoider_node=obstacle_avoidance.avoider_node:main',
-            'bug0=obstacle_avoidance.bug0:main',
-            'bug1=obstacle_avoidance.bug1:main',
-            'bug2=obstacle_avoidance.bug2:main',
+            'avoider_node=obstacle_avoidance_pb.avoider_node:main',
+            'bug0=obstacle_avoidance_pb.bug0:main',
+            'bug1=obstacle_avoidance_pb.bug1:main',
+            'bug2=obstacle_avoidance_pb.bug2:main',
             
 
         ],

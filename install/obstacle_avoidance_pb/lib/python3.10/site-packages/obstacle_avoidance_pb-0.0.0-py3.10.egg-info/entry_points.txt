@@ -1,0 +1,6 @@
+[console_scripts]
+avoider_node = obstacle_avoidance_pb.avoider_node:main
+bug0 = obstacle_avoidance_pb.bug0:main
+bug1 = obstacle_avoidance_pb.bug1:main
+bug2 = obstacle_avoidance_pb.bug2:main
+
