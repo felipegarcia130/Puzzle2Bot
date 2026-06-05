@@ -232,5 +232,10 @@ Selects the optimal beam model configuration (σ_hit, ray skip) using variance-a
 
 ## Author
 
-**Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey  
-Developed as part of course *TE3003B — Robotics Integration*.
+**Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey 
+
+---
+
+<div align="center">
+  
+📫 **Contact**: [garciafjg@outlook.com]
