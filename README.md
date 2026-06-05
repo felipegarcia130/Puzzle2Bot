@@ -150,11 +150,29 @@ ros2_ws/src/mcl_robot/maps/slam_map.npy
 
 ### 2. Lanzar los nodos
 
+#### 🖥️ Simulación (Gazebo)
+
 ```bash
-# Terminal 1 — Localización MCL + EKF
+# Terminal 1 — Simulación PuzzleBot
+ros2 launch puzzlebot_gazebo puzzle_sim_pb.launch.py
+
+# Terminal 2 — Localización MCL + EKF
 ros2 run mcl_robot mcl_node
 
-# Terminal 2 — Planificador A* + control
+# Terminal 3 — Planificador A* + control
+ros2 run mcl_robot astar_node
+```
+
+#### 🤖 Robot real
+
+```bash
+# Terminal 1 — Odometría
+ros2 run mcl_robot odom_node
+
+# Terminal 2 — Localización MCL + EKF
+ros2 run mcl_robot mcl_node
+
+# Terminal 3 — Planificador A* + control
 ros2 run mcl_robot astar_node
 ```
 
