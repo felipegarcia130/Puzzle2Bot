@@ -348,4 +348,4 @@ Selects the optimal beam model configuration (σ_hit, ray skip) using variance-a
 
 **Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey
 
-📫 [garciafjg@outlook.com](mailto:garciafjg@outlook.com) | [a01705893@tec.mx](mailto:a01705893@tec.mx)
+📫 [garciafjg@outlook.com](mailto:garciafjg@outlook.com) 
