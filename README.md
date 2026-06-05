@@ -1,22 +1,22 @@
 # 🤖 MCL + A\* Autonomous Navigation — PuzzleBot
 
-> Monte Carlo Localization con backup EKF y planificación A\* para un robot diferencial sobre ROS 2.
+> Monte Carlo Localization with EKF backup and A\* path planning for a differential drive robot on ROS 2.
 
 ---
 
-## Descripción
+## Overview
 
-Sistema de navegación autónoma para el **PuzzleBot** (robot diferencial) que combina:
+Autonomous navigation system for the **PuzzleBot** (differential drive robot) combining:
 
-- **MCL (Monte Carlo Localization)** con filtro de partículas adaptativo (KLD-sampling) para estimación de pose en un mapa pre-construido.
-- **EKF de respaldo** que mantiene la estimación de posición cuando el LiDAR pierde confianza (obstáculos no mapeados, zonas sin features).
-- **Máquina de estados MCL ↔ EKF** con transiciones suaves y modo de sincronización.
-- **Módulos adaptativos**: modelo de movimiento RAM (Robust Adaptive Motion Model) y selector de configuración del sensor model via Bandit (UCB).
-- **Planificador A\*** sobre mapa inflado con evasión reactiva de obstáculos usando LiDAR.
+- **MCL (Monte Carlo Localization)** with an adaptive particle filter (KLD-sampling) for pose estimation on a pre-built map.
+- **EKF backup** that maintains position estimation when LiDAR confidence drops (unmapped obstacles, feature-sparse zones).
+- **MCL ↔ EKF state machine** with smooth transitions and a synchronization mode.
+- **Adaptive modules**: RAM (Robust Adaptive Motion Model) for motion noise and a Bandit (UCB) sensor model configuration selector.
+- **A\* planner** on an inflated map with reactive LiDAR-based obstacle avoidance.
 
 ---
 
-## Arquitectura
+## Architecture
 
 ```
 /odom  ──────────────────────────────────────────────────────┐
@@ -26,7 +26,7 @@ Sistema de navegación autónoma para el **PuzzleBot** (robot diferencial) que c
                                                     │  RAM motion     │
                                                     │  EKF predict    │
                                                     └────────┬────────┘
-                                                             │ partículas propagadas
+                                                             │ propagated particles
 /scan  ──────────────────────────────────────────────────────┤
                                                              ▼
                                                    ┌──────────────────┐
@@ -42,9 +42,9 @@ Sistema de navegación autónoma para el **PuzzleBot** (robot diferencial) que c
 /goal_pose ──────────────────────────────────────────────── ▼
                                                   ┌──────────────────┐
                                                   │   astar_node     │
-                                                  │   A* + inflado   │
-                                                  │   Control P      │
-                                                  │   Evasión LiDAR  │
+                                                  │   A* + inflation │
+                                                  │   P controller   │
+                                                  │   LiDAR avoidance│
                                                   └────────┬─────────┘
                                                            │
                                                /cmd_vel ───┘
@@ -52,167 +52,167 @@ Sistema de navegación autónoma para el **PuzzleBot** (robot diferencial) que c
 
 ---
 
-## Nodos
+## Nodes
 
 ### `mcl_node.py`
 
-Estimación de pose del robot mediante filtro de partículas con respaldo EKF.
+Robot pose estimation via particle filter with EKF backup.
 
-| Suscribe | Tipo | Descripción |
+| Subscribes | Type | Description |
 |---|---|---|
-| `/odom` | `nav_msgs/Odometry` | Odometría para propagar partículas y predecir EKF |
-| `/scan` | `sensor_msgs/LaserScan` | Mediciones LiDAR para actualizar pesos |
+| `/odom` | `nav_msgs/Odometry` | Odometry for particle propagation and EKF prediction |
+| `/scan` | `sensor_msgs/LaserScan` | LiDAR measurements for weight update |
 
-| Publica | Tipo | Descripción |
+| Publishes | Type | Description |
 |---|---|---|
-| `/mcl_pose` | `geometry_msgs/PoseStamped` | Pose estimada (MCL, EKF o fusionada) |
-| `/map` | `nav_msgs/OccupancyGrid` | Mapa cargado desde `.npy` |
+| `/mcl_pose` | `geometry_msgs/PoseStamped` | Estimated pose (MCL, EKF, or fused) |
+| `/map` | `nav_msgs/OccupancyGrid` | Map loaded from `.npy` |
 
-**Máquina de estados:**
+**State machine:**
 
-| Estado | Condición de entrada | Fuente de pose |
+| State | Entry condition | Pose source |
 |---|---|---|
-| `MCL` | Convergencia > `CONV_HIGH` | Mediana de partículas |
-| `EKF` | Convergencia < `CONV_LOW` por ≥ N scans | Predicción EKF (odometría) |
-| `SYNC` | MCL recuperándose | Fusión ponderada MCL + EKF |
+| `MCL` | Convergence > `CONV_HIGH` | Particle median |
+| `EKF` | Convergence < `CONV_LOW` for ≥ N scans | EKF prediction (odometry only) |
+| `SYNC` | MCL recovering | Weighted fusion MCL + EKF |
 
 ---
 
 ### `astar_node.py`
 
-Planificación de trayectoria y control de movimiento.
+Path planning and motion control.
 
-| Suscribe | Tipo | Descripción |
+| Subscribes | Type | Description |
 |---|---|---|
-| `/mcl_pose` | `geometry_msgs/PoseStamped` | Pose actual del robot |
-| `/goal_pose` | `geometry_msgs/PoseStamped` | Goal publicado desde RViz |
-| `/scan` | `sensor_msgs/LaserScan` | Evasión reactiva de obstáculos |
+| `/mcl_pose` | `geometry_msgs/PoseStamped` | Current robot pose |
+| `/goal_pose` | `geometry_msgs/PoseStamped` | Goal published from RViz |
+| `/scan` | `sensor_msgs/LaserScan` | Reactive obstacle avoidance |
 
-| Publica | Tipo | Descripción |
+| Publishes | Type | Description |
 |---|---|---|
-| `/cmd_vel` | `geometry_msgs/Twist` | Comandos de velocidad |
-| `/planned_path` | `nav_msgs/Path` | Ruta completa para RViz |
-| `/current_waypoint` | `geometry_msgs/PoseStamped` | Waypoint activo |
+| `/cmd_vel` | `geometry_msgs/Twist` | Velocity commands |
+| `/planned_path` | `nav_msgs/Path` | Full path for RViz |
+| `/current_waypoint` | `geometry_msgs/PoseStamped` | Active waypoint |
 
 ---
 
-## Parámetros clave
+## Key Parameters
 
-### Mapa
+### Map
 
-| Parámetro | Valor | Descripción |
+| Parameter | Value | Description |
 |---|---|---|
-| `MAP_X_MIN/MAX` | -4.0 / 5.0 m | Extensión del mapa en X |
-| `MAP_Y_MIN/MAX` | -3.0 / 6.0 m | Extensión del mapa en Y |
-| `RESOLUTION` | 0.05 m/px | Resolución del mapa |
+| `MAP_X_MIN/MAX` | -4.0 / 5.0 m | Map extent in X |
+| `MAP_Y_MIN/MAX` | -3.0 / 6.0 m | Map extent in Y |
+| `RESOLUTION` | 0.05 m/px | Map resolution |
 
 ### MCL
 
-| Parámetro | Valor | Descripción |
+| Parameter | Value | Description |
 |---|---|---|
-| `N` | 200 | Número máximo de partículas |
-| `N_MIN` | 30 | Mínimo con KLD-sampling |
-| `P_NOISE` | 0.8 | Peso del modelo gaussiano en beam model |
-| `CONV_LOW` | 0.25 | Umbral bajo de convergencia → failover a EKF |
-| `CONV_HIGH` | 0.55 | Umbral alto → MCL recupera control |
-| `SCANS_TO_FAILOVER` | 5 | Scans consecutivos bajo umbral para ceder a EKF |
+| `N` | 200 | Maximum number of particles |
+| `N_MIN` | 30 | Minimum with KLD-sampling |
+| `P_NOISE` | 0.8 | Gaussian model weight in beam model |
+| `CONV_LOW` | 0.25 | Low convergence threshold → failover to EKF |
+| `CONV_HIGH` | 0.55 | High convergence threshold → MCL regains control |
+| `SCANS_TO_FAILOVER` | 5 | Consecutive low-confidence scans before EKF takeover |
 
 ### A\*
 
-| Parámetro | Valor | Descripción |
+| Parameter | Value | Description |
 |---|---|---|
-| `INFLATE_RADIUS` | 6 px (0.3 m) | Radio de inflado de obstáculos |
-| `WAYPOINT_TOL` | 0.25 m | Tolerancia para avanzar al siguiente waypoint |
-| `GOAL_TOL` | 0.35 m | Tolerancia para declarar goal alcanzado |
-| `LIN_VEL` | 0.07 m/s | Velocidad lineal nominal |
-| `ANG_VEL` | 0.07 rad/s | Velocidad angular máxima |
+| `INFLATE_RADIUS` | 6 px (0.3 m) | Obstacle inflation radius |
+| `WAYPOINT_TOL` | 0.25 m | Tolerance to advance to next waypoint |
+| `GOAL_TOL` | 0.35 m | Tolerance to declare goal reached |
+| `LIN_VEL` | 0.07 m/s | Nominal linear velocity |
+| `ANG_VEL` | 0.07 rad/s | Maximum angular velocity |
 
 ---
 
-## Requisitos
+## Requirements
 
 - ROS 2 Humble / Jazzy
 - Python ≥ 3.10
 - `numpy`, `opencv-python`, `scipy`
-- RPLIDAR A1 (o simulación en Gazebo)
-- Mapa pre-construido en formato `.npy` (salida del nodo SLAM)
+- RPLIDAR A1 (or Gazebo simulation)
+- Pre-built map in `.npy` format (output from SLAM node)
 
 ---
 
-## Uso
+## Usage
 
-### 1. Colocar el mapa
+### 1. Place the map
 
 ```bash
-# El mapa debe estar en:
+# Map must be located at:
 ros2_ws/src/mcl_robot/maps/slam_map.npy
 ```
 
-### 2. Lanzar los nodos
+### 2. Launch the nodes
 
-#### 🖥️ Simulación (Gazebo)
+#### 🖥️ Simulation (Gazebo)
 
 ```bash
-# Terminal 1 — Simulación PuzzleBot
+# Terminal 1 — PuzzleBot simulation
 ros2 launch puzzlebot_gazebo puzzle_sim_pb.launch.py
 
-# Terminal 2 — Localización MCL + EKF
+# Terminal 2 — MCL + EKF localization
 ros2 run mcl_robot mcl_node
 
-# Terminal 3 — Planificador A* + control
+# Terminal 3 — A* planner + control
 ros2 run mcl_robot astar_node
 ```
 
-#### 🤖 Robot real
+#### 🤖 Real robot
 
 ```bash
-# Terminal 1 — Odometría
+# Terminal 1 — Odometry
 ros2 run mcl_robot odom_node
 
-# Terminal 2 — Localización MCL + EKF
+# Terminal 2 — MCL + EKF localization
 ros2 run mcl_robot mcl_node
 
-# Terminal 3 — Planificador A* + control
+# Terminal 3 — A* planner + control
 ros2 run mcl_robot astar_node
 ```
 
-### 3. Visualizar en RViz
+### 3. Visualize in RViz
 
-Agregar los topics:
+Add the following topics:
 - `/map` → OccupancyGrid
 - `/mcl_pose` → PoseStamped
 - `/planned_path` → Path
 - `/current_waypoint` → PoseStamped
 
-Usar **2D Goal Pose** para enviar un goal.
+Use **2D Goal Pose** to send a navigation goal.
 
 ---
 
-## Módulos internos
+## Internal Modules
 
 ### EKFBackup
 
-EKF de 3 estados `[x, y, θ]` con modelo cinemático diferencial no-lineal. Jacobiano analítico. Ruido de proceso proporcional al movimiento (`Q_trans`, `Q_rot`). Ruido de observación adaptativo según convergencia del MCL.
+3-state EKF `[x, y, θ]` with a non-linear differential drive kinematic model. Analytical Jacobian. Process noise proportional to motion (`Q_trans`, `Q_rot`). Adaptive observation noise scaled by MCL convergence.
 
 ### RobustAdaptiveMotionModel (RAM)
 
-Adapta la covarianza del ruido de movimiento en línea usando un esquema de Robbins-Monro. Objetivo de tasa de aceptación: 35%.
+Adapts the motion noise covariance online using a Robbins-Monro scheme. Target acceptance rate: 35%.
 
 ### BanditSensorSelector
 
-Selecciona la configuración óptima del beam model (σ_hit, skip de rayos) usando UCB con varianza. Permite ajustar automáticamente el balance velocidad/precisión del sensor model.
+Selects the optimal beam model configuration (σ_hit, ray skip) using variance-adjusted UCB. Automatically balances speed and precision of the sensor model.
 
 ---
 
-## Notas
+## Notes
 
-- En entornos con obstáculos dinámicos o zonas sin features, el EKF mantiene la trayectoria relativa mientras el MCL se recupera.
-- Las partículas se redistribuyen alrededor de la estimación EKF durante el estado `EKF`, acelerando la reconvergencia.
-- El ray casting vectorizado opera en espacio de píxeles para máximo rendimiento en NumPy.
+- In environments with dynamic obstacles or feature-sparse zones, the EKF preserves the relative trajectory while MCL recovers.
+- Particles are redistributed around the EKF estimate during the `EKF` state, speeding up reconvergence.
+- Vectorized ray casting operates in pixel space for maximum NumPy performance.
 
 ---
 
-## Autor
+## Author
 
 **Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey  
-Proyecto desarrollado como parte del curso *TE3003B — Integración de Robótica*.
+Developed as part of course *TE3003B — Robotics Integration*.
