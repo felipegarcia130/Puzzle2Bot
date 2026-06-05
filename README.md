@@ -1,8 +1,8 @@
-# 🤖 MCL + A\* Autonomous Navigation — PuzzleBot
+# MCL + A* Autonomous Navigation — PuzzleBot
 
 ![Demo](assets/demomcl.jpeg)
 
-> Monte Carlo Localization with EKF backup and A\* path planning for a differential drive robot on ROS 2.
+> Monte Carlo Localization with EKF backup and A* path planning for a differential drive robot on ROS 2.
 
 ---
 
@@ -10,15 +10,40 @@
 
 Autonomous navigation system for the **PuzzleBot** (differential drive robot) combining:
 
-- **MCL (Monte Carlo Localization)** with an adaptive particle filter (KLD-sampling) for pose estimation on a pre-built map.
-- **EKF backup** that maintains position estimation when LiDAR confidence drops (unmapped obstacles, feature-sparse zones).
-- **MCL ↔ EKF state machine** with smooth transitions and a synchronization mode.
-- **Adaptive modules**: RAM (Robust Adaptive Motion Model) for motion noise and a Bandit (UCB) sensor model configuration selector.
-- **A\* planner** on an inflated map with reactive LiDAR-based obstacle avoidance.
+- **SLAM** — particle-filter based mapping with log-odds occupancy grid and Bresenham ray tracing. Press `s` to save the map.
+- **MCL (Monte Carlo Localization)** — adaptive particle filter (KLD-sampling) for pose estimation on a pre-built map.
+- **EKF backup** — maintains position estimation when LiDAR confidence drops (unmapped obstacles, feature-sparse zones).
+- **MCL ↔ EKF state machine** — smooth transitions and weighted fusion in synchronization mode.
+- **Adaptive modules** — RAM (Robust Adaptive Motion Model) for motion noise and a Bandit (UCB) sensor model configuration selector.
+- **A* planner** — path planning on an inflated occupancy map with reactive LiDAR-based obstacle avoidance.
+- **Autonomous exploration** — frontier-based exploration with periodic replanning and obstacle inflation.
+- **Standalone obstacle avoidance** — Bug0, Bug1, Bug2 wall-following algorithms.
 
 ---
 
-## Architecture
+## Repository Structure
+
+```
+puzzlebot_ws/
+├── src/
+│   ├── mcl_robot_pb/          # Main navigation package
+│   │   ├── mcl_robot_pb/
+│   │   │   ├── mcl_node.py        # MCL + EKF localization
+│   │   │   ├── astar_node.py      # A* planner + motion controller
+│   │   │   ├── slam_node.py       # SLAM (map building)
+│   │   │   ├── exploration_node.py# Frontier-based exploration
+│   │   │   └── odom_node.py       # Wheel encoder odometry (real robot)
+│   │   └── maps/
+│   │       ├── slam_map.npy       # Occupancy map (output from SLAM)
+│   │       └── slam_log_odds.npy  # Raw log-odds map
+│   ├── obstacle_avoidance/    # Standalone Bug0/Bug1/Bug2 algorithms
+│   └── puzzle_sim/            # Gazebo simulation (URDF + launch)
+└── assets/
+```
+
+---
+
+## System Architecture
 
 ```
 /odom  ──────────────────────────────────────────────────────┐
@@ -56,7 +81,7 @@ Autonomous navigation system for the **PuzzleBot** (differential drive robot) co
 
 ## Nodes
 
-### `mcl_node.py`
+### `mcl_node.py` — Localization
 
 Robot pose estimation via particle filter with EKF backup.
 
@@ -80,9 +105,7 @@ Robot pose estimation via particle filter with EKF backup.
 
 ---
 
-### `astar_node.py`
-
-Path planning and motion control.
+### `astar_node.py` — Path Planning & Control
 
 | Subscribes | Type | Description |
 |---|---|---|
@@ -95,6 +118,57 @@ Path planning and motion control.
 | `/cmd_vel` | `geometry_msgs/Twist` | Velocity commands |
 | `/planned_path` | `nav_msgs/Path` | Full path for RViz |
 | `/current_waypoint` | `geometry_msgs/PoseStamped` | Active waypoint |
+
+---
+
+### `slam_node.py` — Map Building
+
+Particle-filter SLAM using log-odds occupancy grid updated with Bresenham ray tracing.
+
+| Subscribes | Type | Description |
+|---|---|---|
+| `/odom` | `nav_msgs/Odometry` | Motion model for particle propagation |
+| `/scan` | `sensor_msgs/LaserScan` | Sensor model for particle weighting + map update |
+
+| Publishes | Type | Description |
+|---|---|---|
+| `/map` | `nav_msgs/OccupancyGrid` | Live occupancy grid |
+| `/slam_pose` | `geometry_msgs/PoseStamped` | Estimated pose during mapping |
+
+Press **`s`** to save the map to `/tmp/slam_map.npy` and `/tmp/slam_log_odds.npy`.
+
+---
+
+### `exploration_node.py` — Autonomous Exploration
+
+Frontier-based exploration: detects free/unknown boundaries on the live map, selects the nearest cluster, plans an A* path toward it, and replans every `REPLAN_INTERVAL` seconds.
+
+| Subscribes | Type | Description |
+|---|---|---|
+| `/map` | `nav_msgs/OccupancyGrid` | Live map from SLAM |
+| `/slam_pose` | `geometry_msgs/PoseStamped` | Current robot pose |
+| `/scan` | `sensor_msgs/LaserScan` | Reactive obstacle avoidance |
+
+| Publishes | Type | Description |
+|---|---|---|
+| `/cmd_vel` | `geometry_msgs/Twist` | Velocity commands |
+
+---
+
+### `odom_node.py` — Wheel Encoder Odometry (real robot)
+
+Integrates encoder velocities from the PuzzleBot's microcontroller into a standard `nav_msgs/Odometry` message and broadcasts the `odom → base_link` TF transform.
+
+| Subscribes | Type | Description |
+|---|---|---|
+| `/VelocityEncL` | `std_msgs/Float32` | Left wheel angular velocity (rad/s) |
+| `/VelocityEncR` | `std_msgs/Float32` | Right wheel angular velocity (rad/s) |
+
+| Publishes | Type | Description |
+|---|---|---|
+| `/odom` | `nav_msgs/Odometry` | Integrated odometry |
+
+Robot parameters: `WHEEL_RADIUS = 0.05 m`, `WHEEL_BASE = 0.19 m`.
 
 ---
 
@@ -119,7 +193,7 @@ Path planning and motion control.
 | `CONV_HIGH` | 0.55 | High convergence threshold → MCL regains control |
 | `SCANS_TO_FAILOVER` | 5 | Consecutive low-confidence scans before EKF takeover |
 
-### A\*
+### A*
 
 | Parameter | Value | Description |
 |---|---|---|
@@ -134,77 +208,114 @@ Path planning and motion control.
 ## Requirements
 
 - ROS 2 Humble / Jazzy
-- Python ≥ 3.10
-- `numpy`, `opencv-python`, `scipy`
+- Python >= 3.10
+- `numpy`, `opencv-python`, `scipy`, `pynput`
 - RPLIDAR A1 (or Gazebo simulation)
-- Pre-built map in `.npy` format (output from SLAM node)
+- Gazebo Classic (for simulation)
 
 ---
 
-## Usage
+## Workflow
 
-### 1. Place the map
+### Phase 1 — Build a map with SLAM
 
-```bash
-# Map must be located at:
-ros2_ws/src/mcl_robot/maps/slam_map.npy
-```
-
-### 2. Launch the nodes
-
-#### 🖥️ Simulation (Gazebo)
+Run the robot manually (teleop) while SLAM builds the map. Press `s` to save.
 
 ```bash
+# Terminal 1 — Simulation or real robot (see below)
 
-# Terminal 1 - PuzzleBot simulation
-ros2 launch puzzlebot_gazebo puzzle_sim_pb.launch.py
+# Terminal 2 — SLAM
+ros2 run mcl_robot_pb slam_node
 
-# Terminal 2 — MCL + EKF localization
-ros2 run mcl_robot mcl_node
-
-# Terminal 3 — A* planner + control
-ros2 run mcl_robot astar_node
-```
-
-#### 🤖 Real robot
-
-```bash
-
-# Connect to Puzzlebot
-ssh puzzlebot@xxx.xxx.xxx.xxx
-
-# Set environment variables
-export ROS_DOMAIN_ID=0
-export ROS_IP=xxx.xxx.xxx.xxx
-
-# Terminal 1 - Launch micro-ROS agent
-ros2 launch puzzlebot_ros micro_ros_agent.launch.py
-
-# Terminal 2 - Run LiDAR
-ros2 run ...
-
-# Terminal 3 - Run teleop for manual control
+# Terminal 3 — Teleop
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
-# Terminal 4 — Odometry
-ros2 run mcl_robot odom_node
-
-# Terminal 5 — MCL + EKF localization
-ros2 run mcl_robot mcl_node
-
-# Terminal 6 — A* planner + control
-ros2 run mcl_robot astar_node
+# When mapping is complete, focus the slam_node terminal and press 's'
+# Map saved to: /tmp/slam_map.npy  and  /tmp/slam_log_odds.npy
 ```
 
-### 3. Visualize in RViz
+Copy the saved map to the package:
 
-Add the following topics:
-- `/map` → OccupancyGrid
-- `/mcl_pose` → PoseStamped
-- `/planned_path` → Path
-- `/current_waypoint` → PoseStamped
+```bash
+cp /tmp/slam_map.npy     src/mcl_robot_pb/maps/slam_map.npy
+cp /tmp/slam_log_odds.npy src/mcl_robot_pb/maps/slam_log_odds.npy
+```
 
-Use **2D Goal Pose** to send a navigation goal.
+> **Note:** `mcl_node` and `astar_node` currently load the map from a hardcoded path.
+> Update the `np.load(...)` calls in both files to point to your map location before running.
+
+---
+
+### Phase 2 — Autonomous navigation
+
+#### Simulation (Gazebo)
+
+```bash
+# Terminal 1 — PuzzleBot simulation
+ros2 launch puzzle_sim_pb gazebo.launch.py
+
+# Terminal 2 — MCL + EKF localization
+ros2 run mcl_robot_pb mcl_node
+
+# Terminal 3 — A* planner + control
+ros2 run mcl_robot_pb astar_node
+```
+
+#### Real robot
+
+```bash
+# On the PuzzleBot (SSH in)
+ssh puzzlebot@<ROBOT_IP>
+export ROS_DOMAIN_ID=0
+
+# Terminal 1 — micro-ROS agent
+ros2 launch puzzlebot_ros micro_ros_agent.launch.py
+
+# Terminal 2 — RPLIDAR
+ros2 run rplidar_ros rplidar_composition
+
+# On the host machine:
+
+# Terminal 3 — Odometry
+ros2 run mcl_robot_pb odom_node
+
+# Terminal 4 — MCL + EKF localization
+ros2 run mcl_robot_pb mcl_node
+
+# Terminal 5 — A* planner + control
+ros2 run mcl_robot_pb astar_node
+```
+
+#### Optional — Autonomous exploration (instead of A*)
+
+```bash
+ros2 run mcl_robot_pb exploration_node
+```
+
+---
+
+### Phase 3 — Visualize in RViz
+
+Add these topics:
+
+| Topic | Message type |
+|---|---|
+| `/map` | `nav_msgs/OccupancyGrid` |
+| `/mcl_pose` | `geometry_msgs/PoseStamped` |
+| `/planned_path` | `nav_msgs/Path` |
+| `/current_waypoint` | `geometry_msgs/PoseStamped` |
+
+Use **2D Goal Pose** in RViz to send a navigation goal.
+
+---
+
+## Build
+
+```bash
+cd puzzlebot_ws
+colcon build --symlink-install
+source install/setup.bash
+```
 
 ---
 
@@ -229,15 +340,12 @@ Selects the optimal beam model configuration (σ_hit, ray skip) using variance-a
 - In environments with dynamic obstacles or feature-sparse zones, the EKF preserves the relative trajectory while MCL recovers.
 - Particles are redistributed around the EKF estimate during the `EKF` state, speeding up reconvergence.
 - Vectorized ray casting operates in pixel space for maximum NumPy performance.
+- The `slam_node` uses `pynput` for the keyboard save shortcut — no root required.
 
 ---
 
 ## Author
 
-**Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey 
+**Felipe Garcia** — Robotics & Digital Systems Engineering, Tecnológico de Monterrey
 
----
-
-<div align="center">
-  
-📫 **Contact**: [garciafjg@outlook.com]
+📫 [garciafjg@outlook.com](mailto:garciafjg@outlook.com) | [a01705893@tec.mx](mailto:a01705893@tec.mx)
