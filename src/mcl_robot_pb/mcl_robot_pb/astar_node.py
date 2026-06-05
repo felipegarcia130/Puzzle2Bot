@@ -272,13 +272,35 @@ class AStarNode(Node):
             cmd.angular.z = 0.0
 
         # Safety LiDAR — frena si hay algo muy cerca al frente
+        # ── Obstacle Avoidance reactivo ───────────────────────────────────
+        DIST_STOP    = 0.45   # distancia de detección
+        DIST_CLEAR   = 0.45   # rayo "libre" si supera esto
+
         front = [r for r in (ranges[0:20] + ranges[340:360])
                  if math.isfinite(r) and not math.isnan(r)]
         min_front = min(front) if front else float('inf')
-        if min_front < 0.25:
-            cmd.linear.x  = 0.0
-            cmd.angular.z = ANG_VEL
-            self.get_logger().warn(f'[SAFETY] obstáculo a {min_front:.2f}m')
+
+        if min_front < DIST_STOP:
+            # Contar rayos libres a cada lado
+            left  = [r for r in ranges[20:90]
+                     if math.isfinite(r) and r > DIST_CLEAR]
+            right = [r for r in ranges[270:340]
+                     if math.isfinite(r) and r > DIST_CLEAR]
+
+            if len(left) > 40 or len(right) > 40:
+                # Hay espacio → girar hacia el lado más libre
+                cmd.linear.x  = 0.0
+                cmd.angular.z = ANG_VEL if len(left) >= len(right) else -ANG_VEL
+                self.get_logger().warn(
+                    f'[AVOID] {min_front:.2f}m → girando {"izq" if len(left) >= len(right) else "der"} '
+                    f'(L={len(left)} R={len(right)})'
+                )
+            else:
+                # Sin espacio → replanear
+                self.get_logger().warn(f'[AVOID] sin espacio — replanificando')
+                self.plan()
+                cmd.linear.x  = 0.0
+                cmd.angular.z = 0.0
 
         self.pub_cmd.publish(cmd)
 
