@@ -1,5 +1,7 @@
 # 🤖 MCL + A\* Autonomous Navigation — PuzzleBot
 
+![Demo](assets/demomcl.jpeg)
+
 > Monte Carlo Localization with EKF backup and A\* path planning for a differential drive robot on ROS 2.
 
 ---
