@@ -297,7 +297,7 @@ class AStarNode(Node):
                 )
             else:
                 # Sin espacio → replanear
-                self.get_logger().warn(f'[AVOID] sin espacio — replanificando')
+                self.get_logger().warn('[AVOID] sin espacio — replanificando')
                 self.plan()
                 cmd.linear.x  = 0.0
                 cmd.angular.z = 0.0

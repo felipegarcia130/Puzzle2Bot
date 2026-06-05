@@ -383,7 +383,8 @@ class MCLNode(Node):
         i = j = 0
         while i < n:
             if pos[i] <= cumsum[j]:
-                idx[i] = j; i += 1
+                idx[i] = j 
+                i += 1
             else:
                 j = min(j + 1, len(cumsum) - 1)
         return idx
@@ -598,7 +599,7 @@ class MCLNode(Node):
         # ══════════════════════════════════════════════════════════════════
         # MÁQUINA DE ESTADOS: MCL ↔ EKF
         # ══════════════════════════════════════════════════════════════════
-        estado_anterior = self.estado
+        #estado_anterior = self.estado
 
         if self.estado == self.STATE_MCL:
             # ── Estado normal: MCL activo ──────────────────────────────────
