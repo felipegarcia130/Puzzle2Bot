@@ -153,13 +153,29 @@ ros2_ws/src/mcl_robot/maps/slam_map.npy
 #### 🖥️ Simulation (Gazebo)
 
 ```bash
-# Terminal 1 — PuzzleBot simulation
+# Connect to Puzzlebot
+ssh puzzlebot@xxx.xxx.xxx.xxx
+
+# Set environment variables
+export ROS_DOMAIN_ID=0
+export ROS_IP=192.168.137.xxx
+
+# Terminal 1 - Launch micro-ROS agent
+ros2 launch puzzlebot_ros micro_ros_agent.launch.py
+
+# Terminal 2 - Launch Lidar
+ros2 run ros2_lidar_ws ...
+
+# Terminal 3 - Teleop for manual control
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+
+# Terminal 4 - PuzzleBot simulation
 ros2 launch puzzlebot_gazebo puzzle_sim_pb.launch.py
 
-# Terminal 2 — MCL + EKF localization
+# Terminal 5 — MCL + EKF localization
 ros2 run mcl_robot mcl_node
 
-# Terminal 3 — A* planner + control
+# Terminal 6 — A* planner + control
 ros2 run mcl_robot astar_node
 ```
 
