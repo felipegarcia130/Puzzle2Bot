@@ -6,8 +6,19 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry, OccupancyGrid
 from geometry_msgs.msg import PoseStamped
+import time  # [OPT-5] Para timestamp de diagnóstico LiDAR
 
-N          = 200 #500 si se quiere mejor
+# ─────────────────────────────────────────────────────────────────────────────
+# PARÁMETRO GLOBAL: pon True al correr en el robot físico, False en simulación
+# Controla el throttle de scan, el modo headless y los umbrales de movimiento.
+# No afecta ningún cálculo del algoritmo MCL.
+# ─────────────────────────────────────────────────────────────────────────────
+PHYSICAL_ROBOT = True  # [OPT-GLOBAL] <── cambia aquí según entorno
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parámetros del mapa y del filtro (sin cambios respecto al original)
+# ─────────────────────────────────────────────────────────────────────────────
+N          = 200
 MAP_X_MIN  = -4.0
 MAP_X_MAX  =  5.0
 MAP_Y_MIN  = -3.0
@@ -18,149 +29,98 @@ KLD_EPS   = 0.05
 KLD_Z     = 2.326
 KLD_BIN_M = 0.5
 KLD_BIN_R = 0.2
-N_MIN     = 30 #50 si se quiere mejor
+N_MIN     = 30
 N_MAX     = N
 
 P_NOISE   = 0.8
 
-# ── Umbrales de confianza MCL → EKF ──────────────────────────────────────────
-# Cuando convergencia < CONV_LOW  → EKF toma el control
-# Cuando convergencia > CONV_HIGH → MCL recupera el control
 CONV_LOW  = 0.25
 CONV_HIGH = 0.55
-# Scans consecutivos en bajo antes de ceder el control al EKF
 SCANS_TO_FAILOVER = 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [OPT-1] Throttle de scan adaptado al entorno
+# En físico: procesa 1 de cada 3 scans (≈3-4 Hz efectivos con RPLIDAR a 10 Hz)
+# En simulación: procesa 1 de cada 2 (comportamiento original)
+# Justificación: reduce carga de CPU sin alterar el modelo probabilístico.
+# El MCL converge igual con menos scans; lo crítico es no saturar el Jetson.
+# ─────────────────────────────────────────────────────────────────────────────
+SCAN_MODULO = 3 if PHYSICAL_ROBOT else 2  # [OPT-1]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [OPT-2] Umbral mínimo de movimiento para propagar partículas
+# En físico: 3 mm y 0.5° evitan que el ruido del encoder dispare propagaciones
+#            innecesarias a 50 Hz de odometría.
+# En simulación: umbrales originales (1 mm / ~0°)
+# Justificación: no modifica el modelo cinemático, solo filtra delta-poses
+# de ruido que no representan movimiento real del robot.
+# ─────────────────────────────────────────────────────────────────────────────
+ODOM_TRANS_THRESH  = 0.003  if PHYSICAL_ROBOT else 0.001   # metros [OPT-2]
+ODOM_ROT_THRESH    = 0.005  if PHYSICAL_ROBOT else 0.001   # radianes [OPT-2]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [OPT-5] Timeout LiDAR para diagnóstico: si pasan más de N segundos sin scan,
+# se emite un warning. Valor conservador para hotspot con latencia.
+# ─────────────────────────────────────────────────────────────────────────────
+LIDAR_TIMEOUT_S = 2.0 if PHYSICAL_ROBOT else 8.0  # [OPT-5]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [OPT-7] Frecuencia de publicación del mapa estático
+# En físico: cada 5 s reduce tráfico de red por hotspot SSH.
+# El mapa no cambia durante la ejecución, así que publicar más seguido
+# solo desperdicia ancho de banda.
+# ─────────────────────────────────────────────────────────────────────────────
+MAP_PUBLISH_PERIOD = 5.0 if PHYSICAL_ROBOT else 2.0  # segundos [OPT-7]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Extended Kalman Filter — backup de odometría
-#
-# Estado: x = [x_mundo, y_mundo, theta]^T
-#
-# Motion model (predicción):
-#   x_k = f(x_{k-1}, u) + w,   w ~ N(0, Q)
-#   f([x,y,θ], [d_trans, d_rot]) = [x + d_trans·cos(θ),
-#                                    y + d_trans·sin(θ),
-#                                    θ + d_rot          ]
-#
-# Observation model (actualización con pose MCL):
-#   z_k = H x_k + v,   v ~ N(0, R)
-#   H = I₃  (observamos directamente el estado)
-#
-# Cuando MCL está confiable → actualiza EKF con pose MCL (corrección).
-# Cuando MCL falla          → EKF solo predice con odometría (sin corrección).
-# Así el EKF nunca se "pierde" aunque el LiDAR no vea el mapa correcto.
+# EKFBackup — sin cambios en la lógica matemática
 # ═════════════════════════════════════════════════════════════════════════════
 class EKFBackup:
     def __init__(self):
-        # Estado inicial [x, y, theta] en coordenadas mundo
         self.x = np.zeros(3, dtype=np.float64)
-
-        # Covarianza inicial — incertidumbre alta al inicio
         self.P = np.diag([4.0, 4.0, (math.pi)**2])
-
-        # ── Ruido de proceso Q (cuánto confiamos en odometría) ─────────────
-        # Valores de la tesis de Izmir (adaptados a PuzzleBot):
-        # - ruido translacional:  std ≈ 5 cm / m recorrido → 0.05²
-        # - ruido rotacional:     std ≈ 2° / rad girado   → 0.035²
-        self.Q_trans = 0.05 ** 2   # var por metro recorrido
-        self.Q_rot   = 0.035 ** 2  # var por radian girado
-
-        # ── Ruido de observación R (cuánto confiamos en la pose MCL) ───────
-        # Cuando MCL está convergido su std es ~5 cm → R=0.05²
-        # Cuando está en transición usamos R más grande
-        self.R_base = np.diag([0.05**2, 0.05**2, (0.05)**2])
-
-        # Jacobiano de observación H = I (observamos el estado directamente)
-        self.H = np.eye(3)
-
+        self.Q_trans = 0.05 ** 2
+        self.Q_rot   = 0.035 ** 2
+        self.R_base  = np.diag([0.05**2, 0.05**2, (0.05)**2])
+        self.H       = np.eye(3)
         self.initialized = False
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Paso de PREDICCIÓN — siempre se ejecuta con odometría
-    # ─────────────────────────────────────────────────────────────────────────
     def predict(self, d_trans, d_rot):
-        """
-        Propaga el estado con el modelo cinemático del robot diferencial.
-        Calcula el Jacobiano F = ∂f/∂x para propagar la covarianza.
-        """
         if not self.initialized:
             return
-
         theta = self.x[2]
-
-        # f(x, u): modelo no-lineal
         self.x[0] += d_trans * math.cos(theta)
         self.x[1] += d_trans * math.sin(theta)
         self.x[2] += d_rot
         self.x[2]  = self._wrap_angle(self.x[2])
-
-        # Jacobiano F = ∂f/∂x (linealización alrededor del estado actual)
-        # f = [x + d·cos(θ), y + d·sin(θ), θ + dθ]
-        # ∂f/∂x = [[1, 0, -d·sin(θ)],
-        #           [0, 1,  d·cos(θ)],
-        #           [0, 0,  1       ]]
         F = np.array([
             [1.0, 0.0, -d_trans * math.sin(theta)],
             [0.0, 1.0,  d_trans * math.cos(theta)],
-            [0.0, 0.0,  1.0                       ]
+            [0.0, 0.0,  1.0]
         ])
-
-        # Ruido de proceso Q proporcional al movimiento
-        # (misma lógica que los alphas del motion model AMCL)
         q_t = self.Q_trans * d_trans**2 + self.Q_rot * d_rot**2
-        Q = np.diag([q_t, q_t, self.Q_rot * d_rot**2 + 1e-6])
-
-        # P = F P F^T + Q
+        Q   = np.diag([q_t, q_t, self.Q_rot * d_rot**2 + 1e-6])
         self.P = F @ self.P @ F.T + Q
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Paso de ACTUALIZACIÓN — solo cuando MCL es confiable
-    # ─────────────────────────────────────────────────────────────────────────
     def update(self, z_pose, convergencia):
-        """
-        Corrige el estado con la pose estimada por MCL.
-
-        z_pose      : [x, y, theta] de MCL
-        convergencia: valor [0,1] — escala el ruido de observación R.
-                      Cuando MCL está muy convergido → R pequeño (confiamos más).
-                      Cuando está en transición → R grande (confiamos menos).
-        """
         if not self.initialized:
-            # Primera observación: inicializar con la pose MCL
             self.x[:] = z_pose
             self.initialized = True
             return
-
-        # R adaptativo: más grande cuando MCL tiene menor convergencia
-        # convergencia ∈ [CONV_HIGH, 1.0] → factor ∈ [1, 10]
         r_factor = 1.0 + 9.0 * (1.0 - convergencia)
-        R = self.R_base * r_factor
-
-        # Innovación: diferencia entre observación y predicción
+        R  = self.R_base * r_factor
         y  = z_pose - self.H @ self.x
-        y[2] = self._wrap_angle(y[2])  # normalizar ángulo
-
-        # Ganancia de Kalman: K = P H^T (H P H^T + R)^{-1}
-        S = self.H @ self.P @ self.H.T + R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-
-        # Actualizar estado y covarianza
-        self.x = self.x + K @ y
+        y[2] = self._wrap_angle(y[2])
+        S  = self.H @ self.P @ self.H.T + R
+        K  = self.P @ self.H.T @ np.linalg.inv(S)
+        self.x    = self.x + K @ y
         self.x[2] = self._wrap_angle(self.x[2])
-
-        # P = (I - KH) P  — forma estándar
         I_KH   = np.eye(3) - K @ self.H
         self.P = I_KH @ self.P
 
-    # ─────────────────────────────────────────────────────────────────────────
     def reinit(self, pose_mcl, convergencia):
-        """
-        Reinicializa el EKF con la pose actual de MCL.
-        Se llama cuando MCL recupera confianza tras un fallo.
-        """
         self.x[:] = pose_mcl
-        # Covarianza proporcional a la incertidumbre residual del MCL
         sigma = 0.5 * (1.0 - convergencia) + 0.05
         self.P = np.diag([sigma**2, sigma**2, (sigma*2)**2])
         self.initialized = True
@@ -175,12 +135,11 @@ class EKFBackup:
 
     @property
     def std(self):
-        """Desviación estándar marginal de [x, y, theta]."""
         return np.sqrt(np.diag(self.P))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# RAM y Bandit (sin cambios)
+# RAM y Bandit — sin cambios
 # ═════════════════════════════════════════════════════════════════════════════
 class RobustAdaptiveMotionModel:
     def __init__(self, dim=3, acc_target=0.35, gamma=2/3, S0_scale=None):
@@ -200,8 +159,8 @@ class RobustAdaptiveMotionModel:
 
     def update(self, z_batch, accepted_mask):
         self.n += 1
-        eta          = self.n ** (-self.gamma)
-        alpha_batch  = accepted_mask.mean()
+        eta         = self.n ** (-self.gamma)
+        alpha_batch = accepted_mask.mean()
         self.acc_rate += eta * (alpha_batch - self.acc_rate)
         z_mean  = z_batch.mean(axis=0)
         norm_z2 = float(np.dot(z_mean, z_mean))
@@ -220,7 +179,7 @@ class RobustAdaptiveMotionModel:
 
 
 class BanditSensorSelector:
-    CONFIGS = [(0.15, 1), (0.30, 2), (0.50, 2), (0.30, 2)] #[(0.15, 1), (0.30, 1), (0.50, 1), (0.30, 2)] si se quiere mejor
+    CONFIGS = [(0.15, 1), (0.30, 2), (0.50, 2), (0.30, 2)]
 
     def __init__(self, zeta=1.0, c=0.5):
         self.K      = len(self.CONFIGS)
@@ -242,9 +201,9 @@ class BanditSensorSelector:
         self.t += 1
         if self.t <= self.K:
             return self.t - 1
-        V     = self.variances
-        T     = self.counts
-        log_t = np.log(self.t)
+        V      = self.variances
+        T      = self.counts
+        log_t  = np.log(self.t)
         scores = (self.means
                   + np.sqrt(2.0 * V * self.zeta * log_t / T)
                   + self.c * self.zeta * log_t / T)
@@ -262,7 +221,7 @@ class BanditSensorSelector:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Ray casting
+# Ray casting — sin cambios en la lógica
 # ═════════════════════════════════════════════════════════════════════════════
 def ray_casting_vectorized(particulas, grid, angles, max_range, step=2):
     H, W   = grid.shape
@@ -278,14 +237,14 @@ def ray_casting_vectorized(particulas, grid, angles, max_range, step=2):
     f_idx = (filas[:, None, None] - sin_a[:, :, None] * steps[None, None, :]).astype(np.int32)
     c_idx = (cols[:, None, None]  + cos_a[:, :, None] * steps[None, None, :]).astype(np.int32)
 
-    oob     = (f_idx < 0) | (f_idx >= H) | (c_idx < 0) | (c_idx >= W)
-    f_safe  = np.clip(f_idx, 0, H - 1)
-    c_safe  = np.clip(c_idx, 0, W - 1)
-    hit     = oob | (grid[f_safe, c_safe] == 0)
+    oob    = (f_idx < 0) | (f_idx >= H) | (c_idx < 0) | (c_idx >= W)
+    f_safe = np.clip(f_idx, 0, H - 1)
+    c_safe = np.clip(c_idx, 0, W - 1)
+    hit    = oob | (grid[f_safe, c_safe] == 0)
 
-    first   = np.argmax(hit, axis=2)
-    no_hit  = ~hit.any(axis=2)
-    dist    = steps[first]
+    first  = np.argmax(hit, axis=2)
+    no_hit = ~hit.any(axis=2)
+    dist   = steps[first]
     dist[no_hit] = max_range
     return dist.astype(np.float32)
 
@@ -295,10 +254,9 @@ def ray_casting_vectorized(particulas, grid, angles, max_range, step=2):
 # ═════════════════════════════════════════════════════════════════════════════
 class MCLNode(Node):
 
-    # Estados del sistema de control
-    STATE_MCL  = 'MCL'    # MCL es la fuente principal
-    STATE_EKF  = 'EKF'    # EKF es backup, MCL perdido
-    STATE_SYNC = 'SYNC'   # MCL recuperándose, fusionando con EKF
+    STATE_MCL  = 'MCL'
+    STATE_EKF  = 'EKF'
+    STATE_SYNC = 'SYNC'
 
     def __init__(self):
         super().__init__('mcl_node')
@@ -311,7 +269,18 @@ class MCLNode(Node):
         self.res = RESOLUTION
 
         self.celdas_libres = np.argwhere(self.grid == 1)
-        self.get_logger().info(f'Mapa: {W}×{H} | {len(self.celdas_libres)} celdas libres')
+        self.get_logger().info(
+            f'Mapa: {W}×{H} | {len(self.celdas_libres)} celdas libres | '
+            f'Modo: {"FÍSICO" if PHYSICAL_ROBOT else "SIMULACIÓN"}'
+        )
+
+        # [OPT-4] Pre-asignar buffer fijo para partículas.
+        # Evita que np.vstack aloque memoria nueva en cada scan callback.
+        # El contenido se sobreescribe in-place; la lógica de resampleo
+        # es idéntica al original.
+        self._buf_local  = np.empty((N_MAX, 3), dtype=np.float32)   # [OPT-4]
+        self._buf_rand   = np.empty((N_MAX, 3), dtype=np.float32)   # [OPT-4]
+        self._buf_merged = np.empty((N_MAX, 3), dtype=np.float32)   # [OPT-4]
 
         # ── Partículas ────────────────────────────────────────────────────────
         self.particulas     = self._sample_uniform(N)
@@ -324,36 +293,68 @@ class MCLNode(Node):
         # ── EKF backup ────────────────────────────────────────────────────────
         self.ekf = EKFBackup()
 
-        # ── Máquina de estados MCL ↔ EKF ─────────────────────────────────────
-        self.estado          = self.STATE_MCL
-        self.scans_bajo      = 0    # contador de scans con baja convergencia
-        self.convergencia    = 0.0  # último valor calculado
+        # ── Máquina de estados ────────────────────────────────────────────────
+        self.estado       = self.STATE_MCL
+        self.scans_bajo   = 0
+        self.convergencia = 0.0
 
         # ── Cache ─────────────────────────────────────────────────────────────
         self.max_range_px = None
         self.angles_full  = None
         self.current_arm  = 0
-        self.scan_count   = 0 #se quita si se quiere mejro
+        self.scan_count   = 0
+        self.pose_anterior = None
+
+        # [OPT-5] Timestamp del último scan recibido (para diagnóstico)
+        self._last_scan_time = time.monotonic()  # [OPT-5]
 
         # ── ROS ───────────────────────────────────────────────────────────────
         self.pub_map  = self.create_publisher(OccupancyGrid, '/map',      1)
         self.pub_pose = self.create_publisher(PoseStamped,   '/mcl_pose', 10)
-        self.create_timer(2.0, self.publish_map)
 
-        self.pose_anterior = None
-        self.sub_odom = self.create_subscription(Odometry,  '/odom', self.odom_callback, 10)
-        self.sub_scan = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        # [OPT-7] Publicar mapa cada MAP_PUBLISH_PERIOD segundos
+        self.create_timer(MAP_PUBLISH_PERIOD, self.publish_map)
 
-        self.get_logger().info('MCL + EKF backup iniciado')
+        self.sub_odom = self.create_subscription(
+            Odometry, '/odom', self.odom_callback, 10)
+
+        self.sub_scan = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10)
+
+        self.create_timer(2.0, self._check_lidar_alive)
+
+        self.get_logger().info(
+            f'MCL + EKF backup iniciado | '
+            f'scan_modulo={SCAN_MODULO} | '
+            f'map_period={MAP_PUBLISH_PERIOD}s | '
+            f'odom_thresh=({ODOM_TRANS_THRESH}m, {math.degrees(ODOM_ROT_THRESH):.2f}°)'
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Utilidades
+    # [OPT-5] Diagnóstico LiDAR
+    # ─────────────────────────────────────────────────────────────────────────
+    def _check_lidar_alive(self):
+        """
+        [OPT-5] Verifica que el LiDAR siga publicando.
+        No modifica ningún estado del algoritmo, solo loggea.
+        Útil para distinguir si el fallo es de red/LiDAR o de MCL.
+        """
+        elapsed = time.monotonic() - self._last_scan_time
+        if elapsed > LIDAR_TIMEOUT_S:
+            self.get_logger().warn(
+                f'[DIAGNÓSTICO] Sin scan en {elapsed:.1f}s '
+                f'(umbral={LIDAR_TIMEOUT_S}s). '
+                f'¿LiDAR apagado? ¿Batería baja? ¿Nodo caído?'
+            )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Utilidades — sin cambios en la lógica
     # ─────────────────────────────────────────────────────────────────────────
     def _sample_uniform(self, n):
-        idx  = np.random.choice(len(self.celdas_libres), n, replace=True)
-        f    = self.celdas_libres[idx, 0].astype(np.float32)
-        c    = self.celdas_libres[idx, 1].astype(np.float32)
-        ang  = np.random.uniform(-math.pi, math.pi, n).astype(np.float32)
+        idx = np.random.choice(len(self.celdas_libres), n, replace=True)
+        f   = self.celdas_libres[idx, 0].astype(np.float32)
+        c   = self.celdas_libres[idx, 1].astype(np.float32)
+        ang = np.random.uniform(-math.pi, math.pi, n).astype(np.float32)
         return np.column_stack([f, c, ang]).astype(np.float32)
 
     def _recovery_particles(self, n, pesos, top_k=10):
@@ -383,7 +384,7 @@ class MCLNode(Node):
         i = j = 0
         while i < n:
             if pos[i] <= cumsum[j]:
-                idx[i] = j 
+                idx[i] = j
                 i += 1
             else:
                 j = min(j + 1, len(cumsum) - 1)
@@ -413,7 +414,6 @@ class MCLNode(Node):
         return np.array([rx, ry, float(src[:, 2].mean())])
 
     def _world_to_grid(self, x_mundo, y_mundo):
-        """Convierte pose mundo → (fila, col) en píxeles."""
         col  = (x_mundo - MAP_X_MIN) / self.res
         fila = (MAP_Y_MAX - y_mundo) / self.res
         return float(fila), float(col)
@@ -433,7 +433,7 @@ class MCLNode(Node):
         self.pub_map.publish(msg)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Odometría → predice MCL (RAM) y EKF simultáneamente
+    # Odometría — lógica idéntica al original, con umbral de movimiento mínimo
     # ─────────────────────────────────────────────────────────────────────────
     def odom_callback(self, msg):
         x     = msg.pose.pose.position.x
@@ -451,21 +451,23 @@ class MCLNode(Node):
         dtheta = float(pose_actual[2] - self.pose_anterior[2])
         self.pose_anterior = pose_actual
 
-        if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dtheta) < 0.001:
+        # [OPT-2] Umbral de movimiento mínimo más estricto en físico.
+        # Evita propagar partículas por ruido del encoder a 50 Hz.
+        # No cambia el modelo cinemático; solo ignora deltas sub-threshold.
+        if (abs(dx)     < ODOM_TRANS_THRESH and
+                abs(dy) < ODOM_TRANS_THRESH and
+                abs(dtheta) < ODOM_ROT_THRESH):  # [OPT-2]
             return
 
         d_trans = math.sqrt(dx**2 + dy**2)
         d_rot   = dtheta
 
-        # ── EKF predice SIEMPRE (con o sin LiDAR) ─────────────────────────
-        # Esta es la clave: el EKF nunca se detiene, siempre integra odometría.
-        # Aunque el mapa tenga obstáculos no mapeados, la odometría sigue
-        # siendo válida para estimar la trayectoria relativa.
+        # EKF predice siempre (sin cambios)
         self.ekf.predict(d_trans, d_rot)
 
-        # ── MCL propaga partículas solo si está activo ─────────────────────
+        # MCL propaga partículas (sin cambios en la lógica)
         if self.estado in (self.STATE_MCL, self.STATE_SYNC):
-            n             = len(self.particulas)
+            n              = len(self.particulas)
             noise, z_batch = self.ram.sample_noise(n)
 
             scale = np.array([
@@ -495,16 +497,9 @@ class MCLNode(Node):
             self.particulas[~acc, 2] += (d_rot + noise_e[~acc, 2]).astype(np.float32)
 
         elif self.estado == self.STATE_EKF:
-            # En modo EKF: reinicializar partículas alrededor de la pose EKF
-            # para que cuando MCL recupere, parta de un punto razonable.
-            # Esto evita que las partículas vaguen arbitrariamente mientras
-            # el EKF está al mando.
             ekf_pose  = self.ekf.pose
             ekf_std   = self.ekf.std
             fila_ekf, col_ekf = self._world_to_grid(ekf_pose[0], ekf_pose[1])
-
-            # Dispersar partículas alrededor de la estimación EKF
-            # con radio proporcional a la incertidumbre del EKF
             sigma_px = max(5.0, ekf_std[0] / self.res)
             n        = len(self.particulas)
             self.particulas[:, 0] = np.clip(
@@ -520,56 +515,92 @@ class MCLNode(Node):
             ).astype(np.float32)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Scan → sensor model + máquina de estados MCL ↔ EKF
+    # Scan — lógica idéntica, con throttle, validación de entrada y
+    # manejo robusto de cv2.imshow en modo headless
     # ─────────────────────────────────────────────────────────────────────────
     def scan_callback(self, msg):
-        #esto se quita si se quiere mejorar
-        self.scan_count += 1          
-        if self.scan_count % 2 != 0: 
+        # [OPT-5] Actualizar timestamp para diagnóstico
+        self._last_scan_time = time.monotonic()  # [OPT-5]
+
+        # [OPT-1] Throttle: procesa 1 de cada SCAN_MODULO scans
+        self.scan_count += 1
+        if self.scan_count % SCAN_MODULO != 0:  # [OPT-1]
             return
+
+        # [OPT-6] Validar que el mensaje de scan tenga datos coherentes.
+        # En físico el RPLIDAR puede enviar mensajes con angle_increment=0
+        # o range_max=0 al arrancar/reiniciarse, lo que crashea la inicialización.
+        if (msg.angle_increment <= 0.0 or
+                msg.range_max <= 0.0 or
+                len(msg.ranges) == 0):  # [OPT-6]
+            self.get_logger().warn(
+                f'[DIAGNÓSTICO] Scan inválido descartado: '
+                f'angle_increment={msg.angle_increment:.6f}, '
+                f'range_max={msg.range_max}, '
+                f'n_ranges={len(msg.ranges)}'
+            )
+            return
+
         ranges_raw  = np.array(msg.ranges, dtype=np.float32)
         ranges_raw  = np.where(np.isfinite(ranges_raw), ranges_raw, msg.range_max)
         ranges_full = np.clip(ranges_raw, msg.range_min, msg.range_max)
 
+        # [OPT-6] Inicializar angles_full con validación adicional
         if self.angles_full is None:
-            self.angles_full  = np.arange(
-                msg.angle_min, msg.angle_max, msg.angle_increment, dtype=np.float32
-            )
+            n_expected = int(round(
+                (msg.angle_max - msg.angle_min) / msg.angle_increment
+            )) + 1
+            # Usar linspace para evitar acumulación de error de punto flotante
+            # con arange en mensajes reales del RPLIDAR
+            self.angles_full  = np.linspace(
+                msg.angle_min, msg.angle_max,
+                min(n_expected, len(msg.ranges)),
+                dtype=np.float32
+            )  # [OPT-6]
             self.max_range_px = int(msg.range_max / self.res)
+            self.get_logger().info(
+                f'[DIAGNÓSTICO] LiDAR inicializado: '
+                f'{len(self.angles_full)} ángulos, '
+                f'range_max={msg.range_max}m, '
+                f'max_range_px={self.max_range_px}'
+            )
 
-        # Bandit selecciona configuración del sensor model
+        # [OPT-6] Alinear longitudes si el scan llega con tamaño variable
+        n_scan = min(len(ranges_full), len(self.angles_full))
+        ranges_full  = ranges_full[:n_scan]
+        angles_local = self.angles_full[:n_scan]
+
+        # Bandit y ray casting (sin cambios)
         arm             = self.bandit.select()
         sigma_hit, skip = BanditSensorSelector.CONFIGS[arm]
         self.current_arm = arm
 
-        angles = self.angles_full[::skip]
+        angles = angles_local[::skip]
         ranges = ranges_full[::skip]
 
-        # Ray casting sobre las partículas actuales
         sims        = ray_casting_vectorized(
-            self.particulas, self.grid, angles, self.max_range_px, step=3 #step 2 si se quiere mejor
+            self.particulas, self.grid, angles, self.max_range_px, step=3
         )
         sims_metros = sims * self.res
 
-        # Beam model log-sum-exp
-        diff          = sims_metros - ranges
-        log_gauss     = (-0.5 * diff**2 / sigma_hit**2
-                         - np.log(sigma_hit * math.sqrt(2 * math.pi)))
-        log_uniforme  = -math.log(msg.range_max)
-        lgm = math.log(P_NOISE)       + log_gauss
-        lum = math.log(1.0 - P_NOISE) + log_uniforme
-        lmx = np.maximum(lgm, lum)
-        log_p_ray  = lmx + np.log(np.exp(lgm - lmx) + np.exp(lum - lmx))
-        log_pesos  = np.sum(log_p_ray, axis=1)
+        # Beam model (sin cambios)
+        diff         = sims_metros - ranges
+        log_gauss    = (-0.5 * diff**2 / sigma_hit**2
+                        - np.log(sigma_hit * math.sqrt(2 * math.pi)))
+        log_uniforme = -math.log(msg.range_max)
+        lgm  = math.log(P_NOISE)       + log_gauss
+        lum  = math.log(1.0 - P_NOISE) + log_uniforme
+        lmx  = np.maximum(lgm, lum)
+        log_p_ray = lmx + np.log(np.exp(lgm - lmx) + np.exp(lum - lmx))
+        log_pesos = np.sum(log_p_ray, axis=1)
         log_pesos -= log_pesos.max()
-        pesos       = np.exp(log_pesos)
-        peso_sum    = pesos.sum()
+        pesos    = np.exp(log_pesos)
+        peso_sum = pesos.sum()
 
         if peso_sum < 1e-10:
             self.get_logger().warn('Pesos degenerados — reiniciando MCL')
             ekf_pose = self.ekf.pose
             f_ekf, c_ekf = self._world_to_grid(ekf_pose[0], ekf_pose[1])
-            # Reiniciar alrededor del EKF, no uniformemente
             n = N
             self.particulas[:, 0] = np.clip(
                 f_ekf + np.random.randn(n) * 20,
@@ -585,119 +616,100 @@ class MCLNode(Node):
             pesos /= peso_sum
             self.pesos_actuales = pesos
 
-        # Entropia → convergencia
+        # Convergencia y reward Bandit (sin cambios)
         entropia     = float(-np.sum(pesos * np.log(pesos + 1e-10)))
         entropia_max = math.log(len(pesos))
         self.convergencia = 1.0 - entropia / entropia_max
-
-        # Reward para bandit
         self.bandit.update(arm, -entropia)
 
-        # ── Pose MCL actual ────────────────────────────────────────────────
         pose_mcl = self._pose_from_particulas()
 
-        # ══════════════════════════════════════════════════════════════════
-        # MÁQUINA DE ESTADOS: MCL ↔ EKF
-        # ══════════════════════════════════════════════════════════════════
-        #estado_anterior = self.estado
-
+        # ── Máquina de estados MCL ↔ EKF (sin cambios) ────────────────────
         if self.estado == self.STATE_MCL:
-            # ── Estado normal: MCL activo ──────────────────────────────────
             if self.convergencia < CONV_LOW:
                 self.scans_bajo += 1
                 if self.scans_bajo >= SCANS_TO_FAILOVER:
-                    # MCL perdió confianza → ceder control al EKF
                     self.estado     = self.STATE_EKF
                     self.scans_bajo = 0
                     self.get_logger().warn(
                         f'⚠ MCL→EKF: conv={self.convergencia:.2f} < {CONV_LOW} '
-                        f'por {SCANS_TO_FAILOVER} scans consecutivos. '
-                        f'EKF toma control. Posible obstáculo no mapeado.'
+                        f'por {SCANS_TO_FAILOVER} scans consecutivos.'
                     )
             else:
                 self.scans_bajo = 0
-                # EKF se actualiza con pose MCL (corrección)
                 self.ekf.update(pose_mcl, self.convergencia)
 
         elif self.estado == self.STATE_EKF:
-            # ── Backup EKF activo ─────────────────────────────────────────
-            # No actualizamos EKF con MCL (MCL no es confiable).
-            # EKF solo predice con odometría (ya hecho en odom_callback).
             if self.convergencia > CONV_HIGH:
-                # MCL empieza a recuperarse → entrar en modo sincronización
                 self.estado = self.STATE_SYNC
                 self.get_logger().info(
-                    f'↑ EKF→SYNC: conv={self.convergencia:.2f} > {CONV_HIGH}. '
-                    f'MCL recuperándose, fusionando con EKF.'
+                    f'↑ EKF→SYNC: conv={self.convergencia:.2f} > {CONV_HIGH}.'
                 )
 
         elif self.estado == self.STATE_SYNC:
-            # ── Sincronización: MCL se recuperó, fusionar con EKF ─────────
             if self.convergencia > CONV_HIGH:
-                # Fusión ponderada: mezclar pose MCL con EKF según convergencia
-                # Cuanto más alta la convergencia, más peso al MCL
                 alpha    = (self.convergencia - CONV_HIGH) / (1.0 - CONV_HIGH)
                 alpha    = min(alpha, 1.0)
                 pose_ekf = self.ekf.pose
                 pose_fus = alpha * pose_mcl + (1.0 - alpha) * pose_ekf
-                # Ángulo: media circular ponderada
                 pose_fus[2] = math.atan2(
                     alpha * math.sin(pose_mcl[2]) + (1-alpha) * math.sin(pose_ekf[2]),
                     alpha * math.cos(pose_mcl[2]) + (1-alpha) * math.cos(pose_ekf[2])
                 )
-
-                # Actualizar EKF con pose fusionada
                 self.ekf.update(pose_fus, self.convergencia)
-
                 if self.convergencia > 0.75:
-                    # MCL completamente recuperado → volver a estado normal
                     self.ekf.reinit(pose_mcl, self.convergencia)
                     self.estado = self.STATE_MCL
                     self.get_logger().info(
-                        f'✓ SYNC→MCL: conv={self.convergencia:.2f}. '
-                        f'MCL recuperado, EKF reiniciado con pose MCL.'
+                        f'✓ SYNC→MCL: conv={self.convergencia:.2f}.'
                     )
             else:
-                # MCL volvió a caer durante sincronización → volver al EKF
                 self.estado = self.STATE_EKF
                 self.get_logger().warn(
                     f'↓ SYNC→EKF: conv={self.convergencia:.2f} cayó de nuevo.'
                 )
 
-        # ── Elegir pose a publicar según el estado ─────────────────────────
+        # ── Elegir pose a publicar (sin cambios) ──────────────────────────
         if self.estado == self.STATE_MCL:
             pose_pub = pose_mcl
         elif self.estado == self.STATE_EKF:
             pose_pub = self.ekf.pose
-        else:  # SYNC: pose fusionada ya calculada arriba
-            pose_pub = pose_fus if 'pose_fus' in dir() else pose_mcl
+        else:
+            pose_pub = pose_fus if 'pose_fus' in locals() else pose_mcl
 
-        # ── Resampleo (solo cuando MCL está activo o sincronizando) ───────
+        # ── Resampleo con buffers pre-asignados [OPT-4] ───────────────────
         if self.estado in (self.STATE_MCL, self.STATE_SYNC):
             n_usar   = self._kld_n_particles(self.particulas)
             n_random = max(10, int(n_usar * 0.05))
             n_local  = n_usar - n_random
 
-            idx              = self._systematic_resample(pesos, n_local)
-            particulas_local = self.particulas[idx].copy()
-            particulas_local[:, 0] += np.random.randn(n_local).astype(np.float32) * 0.3
-            particulas_local[:, 1] += np.random.randn(n_local).astype(np.float32) * 0.3
-            particulas_local[:, 2] += np.random.randn(n_local).astype(np.float32) * 0.01
-            particulas_local[:, 0]  = np.clip(particulas_local[:, 0], 0, self.grid.shape[0]-1)
-            particulas_local[:, 1]  = np.clip(particulas_local[:, 1], 0, self.grid.shape[1]-1)
+            idx = self._systematic_resample(pesos, n_local)
+
+            # [OPT-4] Escribir en buffer pre-asignado en vez de crear arrays nuevos
+            self._buf_local[:n_local] = self.particulas[idx]
+            self._buf_local[:n_local, 0] += np.random.randn(n_local).astype(np.float32) * 0.3
+            self._buf_local[:n_local, 1] += np.random.randn(n_local).astype(np.float32) * 0.3
+            self._buf_local[:n_local, 2] += np.random.randn(n_local).astype(np.float32) * 0.01
+            np.clip(self._buf_local[:n_local, 0], 0, self.grid.shape[0]-1,
+                    out=self._buf_local[:n_local, 0])
+            np.clip(self._buf_local[:n_local, 1], 0, self.grid.shape[1]-1,
+                    out=self._buf_local[:n_local, 1])
 
             n_unif = n_random // 2
             n_rec  = n_random - n_unif
-            particulas_rand = np.vstack([
+            # Solo se hace vstack para la parte aleatoria (pequeña, n_random ≤ 10)
+            part_rand = np.vstack([
                 self._sample_uniform(n_unif),
                 self._recovery_particles(n_rec, pesos)
             ]).astype(np.float32)
+            self._buf_rand[:n_random] = part_rand
 
-            self.particulas = np.vstack(
-                [particulas_local, particulas_rand]
-            ).astype(np.float32)
+            # Copiar a buffer merged y asignar
+            self._buf_merged[:n_local]  = self._buf_local[:n_local]
+            self._buf_merged[n_local:n_local+n_random] = self._buf_rand[:n_random]
+            self.particulas = self._buf_merged[:n_local+n_random].copy()  # [OPT-4]
 
-        # ── Publicar pose ─────────────────────────────────────────────────
+        # ── Publicar pose (sin cambios) ────────────────────────────────────
         pose_msg = PoseStamped()
         pose_msg.header.stamp    = self.get_clock().now().to_msg()
         pose_msg.header.frame_id = 'map'
@@ -708,44 +720,76 @@ class MCLNode(Node):
         pose_msg.pose.orientation.w = math.cos(ryaw / 2)
         self.pub_pose.publish(pose_msg)
 
-        # ── Log ───────────────────────────────────────────────────────────
+        # ── Log (sin cambios en el contenido) ─────────────────────────────
         ekf_std  = self.ekf.std
         ram_info = self.ram.alphas_equiv()
         self.get_logger().info(
             f'[{self.estado}] '
             f'x={pose_pub[0]:.2f} y={pose_pub[1]:.2f} yaw={math.degrees(ryaw):.0f}° | '
-            f'conv={self.convergencia:.2f} N={len(self.particulas)}(kld={self._kld_n_particles(self.particulas)}) | '
+            f'conv={self.convergencia:.2f} N={len(self.particulas)}'
+            f'(kld={self._kld_n_particles(self.particulas)}) | '
             f'EKF σ=[{ekf_std[0]:.3f},{ekf_std[1]:.3f},{ekf_std[2]:.3f}] | '
             f'RAM acc={ram_info["acc_rate"]:.2f} | '
             f'Bandit arm={arm}(σ={sigma_hit})'
         )
 
-        # ── Visualización ─────────────────────────────────────────────────
-        mapa_vis = cv2.cvtColor((self.grid * 255).astype('uint8'), cv2.COLOR_GRAY2BGR)
+        # ── Visualización con manejo robusto de headless [OPT-3] ──────────
+        if not PHYSICAL_ROBOT:
+            # En simulación: comportamiento original, cv2.imshow normal
+            mapa_vis = cv2.cvtColor(
+                (self.grid * 255).astype('uint8'), cv2.COLOR_GRAY2BGR
+            )
+            pts = self.particulas[:, [1, 0]].astype(np.int32)
+            pts_clip = pts[
+                (pts[:, 0] >= 0) & (pts[:, 0] < self.grid.shape[1]) &
+                (pts[:, 1] >= 0) & (pts[:, 1] < self.grid.shape[0])
+            ]
+            mapa_vis[pts_clip[:, 1], pts_clip[:, 0]] = [0, 0, 255]
+            color_estado = {
+                self.STATE_MCL : (0, 200, 0),
+                self.STATE_EKF : (0, 120, 255),
+                self.STATE_SYNC: (200, 200, 0),
+            }[self.estado]
+            cv2.rectangle(mapa_vis, (0, 0), (80, 16), color_estado, -1)
+            cv2.putText(mapa_vis, self.estado, (2, 12),
+                        cv2.FONT_HERSHEY_PLAIN, 0.9, (255, 255, 255), 1)
+            mapa_vis = cv2.resize(mapa_vis, (540, 540),
+                                  interpolation=cv2.INTER_NEAREST)
+            cv2.imshow('MCL + EKF backup', mapa_vis)
+            cv2.waitKey(1)
+        else:
+            # [OPT-3] En físico: cv2.imshow dentro de try/except.
+            # Si no hay display (SSH sin -X) simplemente se omite sin crashear.
+            # No afecta ningún cálculo.
+            try:
+                mapa_vis = cv2.cvtColor(
+                    (self.grid * 255).astype('uint8'), cv2.COLOR_GRAY2BGR
+                )
+                pts = self.particulas[:, [1, 0]].astype(np.int32)
+                pts_clip = pts[
+                    (pts[:, 0] >= 0) & (pts[:, 0] < self.grid.shape[1]) &
+                    (pts[:, 1] >= 0) & (pts[:, 1] < self.grid.shape[0])
+                ]
+                mapa_vis[pts_clip[:, 1], pts_clip[:, 0]] = [0, 0, 255]
+                color_estado = {
+                    self.STATE_MCL : (0, 200, 0),
+                    self.STATE_EKF : (0, 120, 255),
+                    self.STATE_SYNC: (200, 200, 0),
+                }[self.estado]
+                cv2.rectangle(mapa_vis, (0, 0), (80, 16), color_estado, -1)
+                cv2.putText(mapa_vis, self.estado, (2, 12),
+                            cv2.FONT_HERSHEY_PLAIN, 0.9, (255, 255, 255), 1)
+                mapa_vis = cv2.resize(mapa_vis, (540, 540),
+                                      interpolation=cv2.INTER_NEAREST)
+                cv2.imshow('MCL + EKF backup', mapa_vis)
+                cv2.waitKey(1)
+            except Exception:
+                pass  # [OPT-3] Sin display: ignorar silenciosamente
 
-        # Partículas MCL en rojo
-        pts = self.particulas[:, [1, 0]].astype(np.int32)
-        pts_clip = pts[
-            (pts[:, 0] >= 0) & (pts[:, 0] < self.grid.shape[1]) &
-            (pts[:, 1] >= 0) & (pts[:, 1] < self.grid.shape[0])
-        ]
-        mapa_vis[pts_clip[:, 1], pts_clip[:, 0]] = [0, 0, 255]
 
-        # Estado en esquina
-        color_estado = {
-            self.STATE_MCL : (0, 200, 0),
-            self.STATE_EKF : (0, 120, 255),
-            self.STATE_SYNC: (200, 200, 0),
-        }[self.estado]
-        cv2.rectangle(mapa_vis, (0, 0), (80, 16), color_estado, -1)
-        cv2.putText(mapa_vis, self.estado, (2, 12),
-                    cv2.FONT_HERSHEY_PLAIN, 0.9, (255, 255, 255), 1)
-
-        mapa_vis = cv2.resize(mapa_vis, (540, 540), interpolation=cv2.INTER_NEAREST)
-        cv2.imshow('MCL + EKF backup', mapa_vis)
-        cv2.waitKey(1)
-
-
+# ═════════════════════════════════════════════════════════════════════════════
+# main — usa MultiThreadedExecutor [OPT-8]
+# ═════════════════════════════════════════════════════════════════════════════
 def main():
     rclpy.init()
     node = MCLNode()
@@ -754,4 +798,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-  

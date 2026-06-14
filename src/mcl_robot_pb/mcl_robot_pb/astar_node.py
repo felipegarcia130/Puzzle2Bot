@@ -273,8 +273,8 @@ class AStarNode(Node):
 
         # Safety LiDAR — frena si hay algo muy cerca al frente
         # ── Obstacle Avoidance reactivo ───────────────────────────────────
-        DIST_STOP    = 0.45   # distancia de detección
-        DIST_CLEAR   = 0.45   # rayo "libre" si supera esto
+        DIST_STOP    = 0.25   # distancia de detección
+        DIST_CLEAR   = 0.25   # rayo "libre" si supera esto
 
         front = [r for r in (ranges[0:20] + ranges[340:360])
                  if math.isfinite(r) and not math.isnan(r)]
